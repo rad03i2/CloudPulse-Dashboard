@@ -1,0 +1,33 @@
+{
+  "name": "cloudpulse-dashboard",
+  "version": "1.0.0",
+  "description": "Enterprise Real-Time Cloud Infrastructure & Microservices Health Telemetry Dashboard",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "jest"
+  },
+  "keywords": [
+    "typescript",
+    "dashboard",
+    "telemetry",
+    "devops",
+    "monitoring",
+    "microservices",
+    "cloud-infrastructure",
+    "react"
+  ],
+  "author": "rad03i2",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "@types/node": "^20.11.0",
+    "jest": "^29.7.0",
+    "@types/jest": "^29.5.11",
+    "ts-jest": "^29.1.1"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}
