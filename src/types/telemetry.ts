@@ -1,18 +1,4 @@
-/**
- * CloudPulse TypeScript Telemetry & Incident Schema Definitions.
- */
-
 export type ServiceStatus = "HEALTHY" | "DEGRADED" | "CRITICAL";
-
-export interface NodeMetrics {
-  nodeId: string;
-  cluster: string;
-  cpuUsagePercent: number;
-  memoryUsagePercent: number;
-  diskIoRateMb: number;
-  temperatureCelsius: number;
-  timestamp: number;
-}
 
 export interface ServiceHealth {
   serviceId: string;
@@ -23,23 +9,21 @@ export interface ServiceHealth {
   errorRatePercent: number;
   requestsPerSecond: number;
   uptimeSeconds: number;
-}
-
-export interface IncidentAlert {
-  alertId: string;
-  serviceId: string;
-  severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
-  title: string;
-  message: string;
-  metricValue: number;
-  threshold: number;
   timestamp: number;
 }
 
-export interface SystemOverview {
-  totalNodes: number;
-  healthyServices: number;
-  activeIncidents: number;
-  aggregateRps: number;
-  avgLatencyMs: number;
+export interface IncidentAlert {
+  id: string;
+  serviceId: string;
+  serviceName: string;
+  severity: "warning" | "critical";
+  message: string;
+  timestamp: number;
+}
+
+export interface DashboardSnapshot {
+  timestamp: number;
+  services: ServiceHealth[];
+  recentAlerts: IncidentAlert[];
+  summary: { total: number; healthy: number; degraded: number; critical: number };
 }

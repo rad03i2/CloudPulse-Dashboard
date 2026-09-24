@@ -1,53 +1,30 @@
-import { NodeMetrics, ServiceHealth, ServiceStatus } from "../types/telemetry";
+import { AlertEvaluator, classifyService } from "./alert_rules";
+import { DashboardSnapshot, IncidentAlert, ServiceHealth } from "../types/telemetry";
 
-export class TelemetryAggregator {
-  private latencies: number[] = [];
-  private maxSamples = 1000;
+export class TelemetryStore {
+  private services = new Map<string, ServiceHealth>();
+  private alerts: IncidentAlert[] = [];
+  constructor(private readonly maxAlerts = 100) {}
 
-  public recordLatency(ms: number): void {
-    this.latencies.push(ms);
-    if (this.latencies.length > this.maxSamples) {
-      this.latencies.shift();
-    }
+  ingest(raw: Omit<ServiceHealth, "status">): ServiceHealth {
+    const service: ServiceHealth = { ...raw, status: classifyService(raw) };
+    this.services.set(service.serviceId, service);
+    const alert = AlertEvaluator.evaluateService(service);
+    if (alert) { this.alerts.unshift(alert); this.alerts = this.alerts.slice(0, this.maxAlerts); }
+    return service;
   }
 
-  public calculatePercentile(percentile: number): number {
-    if (this.latencies.length === 0) return 0;
-    const sorted = [...this.latencies].sort((a, b) => a - b);
-    const index = Math.ceil((percentile / 100) * sorted.length) - 1;
-    return Number(sorted[Math.max(0, index)].toFixed(2));
+  snapshot(): DashboardSnapshot {
+    const services = [...this.services.values()].sort((a, b) => a.serviceName.localeCompare(b.serviceName));
+    return { timestamp: Date.now(), services, recentAlerts: this.alerts.slice(0, 20), summary: { total: services.length, healthy: services.filter(s => s.status === "HEALTHY").length, degraded: services.filter(s => s.status === "DEGRADED").length, critical: services.filter(s => s.status === "CRITICAL").length } };
   }
+}
 
-  public generateMockServiceHealth(serviceId: string, name: string): ServiceHealth {
-    const errorRate = Number((Math.random() * 2.5).toFixed(2));
-    const p95 = Number((45 + Math.random() * 80).toFixed(1));
-    const p99 = Number((p95 + 20 + Math.random() * 50).toFixed(1));
-
-    let status: ServiceStatus = "HEALTHY";
-    if (errorRate > 2.0 || p99 > 180) status = "DEGRADED";
-    if (errorRate > 5.0 || p99 > 300) status = "CRITICAL";
-
-    return {
-      serviceId,
-      serviceName: name,
-      status,
-      latencyP95Ms: p95,
-      latencyP99Ms: p99,
-      errorRatePercent: errorRate,
-      requestsPerSecond: Math.floor(1200 + Math.random() * 800),
-      uptimeSeconds: 864000,
-    };
-  }
-
-  public generateMockNode(nodeId: string, cluster: string): NodeMetrics {
-    return {
-      nodeId,
-      cluster,
-      cpuUsagePercent: Number((30 + Math.random() * 55).toFixed(1)),
-      memoryUsagePercent: Number((50 + Math.random() * 35).toFixed(1)),
-      diskIoRateMb: Number((12.5 + Math.random() * 40).toFixed(2)),
-      temperatureCelsius: Number((42 + Math.random() * 18).toFixed(1)),
-      timestamp: Date.now(),
-    };
-  }
+export function validateTelemetry(value: unknown): Omit<ServiceHealth, "status"> {
+  if (!value || typeof value !== "object") throw new Error("JSON object required");
+  const v = value as Record<string, unknown>;
+  const text = (k: string) => { if (typeof v[k] !== "string" || !(v[k] as string).trim()) throw new Error(`${k} must be a non-empty string`); return (v[k] as string).trim(); };
+  const num = (k: string, min = 0) => { if (typeof v[k] !== "number" || !Number.isFinite(v[k]) || (v[k] as number) < min) throw new Error(`${k} must be a finite number >= ${min}`); return v[k] as number; };
+  const errorRatePercent = num("errorRatePercent"); if (errorRatePercent > 100) throw new Error("errorRatePercent must be <= 100");
+  return { serviceId: text("serviceId"), serviceName: text("serviceName"), latencyP95Ms: num("latencyP95Ms"), latencyP99Ms: num("latencyP99Ms"), errorRatePercent, requestsPerSecond: num("requestsPerSecond"), uptimeSeconds: num("uptimeSeconds"), timestamp: typeof v.timestamp === "number" && Number.isFinite(v.timestamp) ? v.timestamp : Date.now() };
 }

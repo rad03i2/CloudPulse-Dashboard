@@ -1,58 +1,24 @@
-import http from "http";
-import fs from "fs";
-import path from "path";
-import { TelemetryAggregator } from "./core/streamer";
-import { AlertEvaluator } from "./core/alert_rules";
-import { IncidentAlert, ServiceHealth } from "./types/telemetry";
+import http from "node:http";
+import fs from "node:fs";
+import path from "node:path";
+import { TelemetryStore, validateTelemetry } from "./core/streamer";
 
-const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
-const aggregator = new TelemetryAggregator();
-
-const SERVICES = [
-  { id: "srv-auth", name: "Authentication API" },
-  { id: "srv-payments", name: "Payment Gateway" },
-  { id: "srv-inventory", name: "Inventory Service" },
-  { id: "srv-notifications", name: "Push Notification Hub" },
-];
-
-const activeAlerts: IncidentAlert[] = [];
-
-const server = http.createServer((req, res) => {
-  if (req.url === "/api/telemetry") {
-    const services: ServiceHealth[] = SERVICES.map((s) =>
-      aggregator.generateMockServiceHealth(s.id, s.name)
-    );
-
-    // Evaluate alerts
-    services.forEach((srv) => {
-      const alert = AlertEvaluator.evaluateService(srv);
-      if (alert) activeAlerts.unshift(alert);
-    });
-
-    if (activeAlerts.length > 20) activeAlerts.pop();
-
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(
-      JSON.stringify({
-        timestamp: Date.now(),
-        services,
-        recentAlerts: activeAlerts.slice(0, 5),
-      })
-    );
-    return;
-  }
-
-  // Serve Dashboard HTML
-  const htmlPath = path.join(__dirname, "../public/index.html");
-  if (fs.existsSync(htmlPath)) {
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-    res.end(fs.readFileSync(htmlPath));
-  } else {
-    res.writeHead(200, { "Content-Type": "text/plain" });
-    res.end("CloudPulse Telemetry Server Online.");
-  }
-});
-
-server.listen(PORT, () => {
-  console.log(`CloudPulse Dashboard server running at http://localhost:${PORT}`);
-});
+export function createApp(store = new TelemetryStore()): http.Server {
+  const publicDir = path.resolve(__dirname, "../public");
+  return http.createServer((req, res) => {
+    res.setHeader("X-Content-Type-Options", "nosniff"); res.setHeader("X-Frame-Options", "DENY"); res.setHeader("Referrer-Policy", "no-referrer");
+    if (req.method === "GET" && req.url === "/health") return json(res, 200, { status: "ok" });
+    if (req.method === "GET" && req.url === "/api/telemetry") return json(res, 200, store.snapshot());
+    if (req.method === "POST" && req.url === "/api/telemetry") {
+      let body = ""; let tooLarge = false;
+      req.on("data", chunk => { body += chunk; if (body.length > 64 * 1024) tooLarge = true; });
+      req.on("end", () => { if (tooLarge) return json(res, 413, { error: "payload too large" }); try { const parsed = JSON.parse(body); const saved = store.ingest(validateTelemetry(parsed)); return json(res, 201, saved); } catch (error) { return json(res, 400, { error: error instanceof Error ? error.message : "invalid request" }); } });
+      return;
+    }
+    if (req.method !== "GET" || (req.url !== "/" && req.url !== "/index.html")) return json(res, 404, { error: "not found" });
+    const file = path.join(publicDir, "index.html");
+    fs.readFile(file, (error, data) => { if (error) return json(res, 500, { error: "dashboard unavailable" }); res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }); res.end(data); });
+  });
+}
+function json(res: http.ServerResponse, status: number, value: unknown): void { res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" }); res.end(JSON.stringify(value)); }
+if (require.main === module) { const port = Number(process.env.PORT ?? 3000); if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("PORT must be between 1 and 65535"); createApp().listen(port, "0.0.0.0", () => console.log(`CloudPulse Dashboard listening on http://localhost:${port}`)); }

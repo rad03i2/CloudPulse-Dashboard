@@ -1,49 +1,18 @@
-import { ServiceHealth, NodeMetrics, IncidentAlert } from "../types/telemetry";
+import { IncidentAlert, ServiceHealth, ServiceStatus } from "../types/telemetry";
+
+export interface Thresholds { degradedLatencyMs: number; criticalLatencyMs: number; degradedErrorRate: number; criticalErrorRate: number; }
+export const DEFAULT_THRESHOLDS: Thresholds = { degradedLatencyMs: 180, criticalLatencyMs: 300, degradedErrorRate: 2, criticalErrorRate: 5 };
+
+export function classifyService(input: Omit<ServiceHealth, "status">, thresholds = DEFAULT_THRESHOLDS): ServiceStatus {
+  if (input.errorRatePercent >= thresholds.criticalErrorRate || input.latencyP99Ms >= thresholds.criticalLatencyMs) return "CRITICAL";
+  if (input.errorRatePercent >= thresholds.degradedErrorRate || input.latencyP99Ms >= thresholds.degradedLatencyMs) return "DEGRADED";
+  return "HEALTHY";
+}
 
 export class AlertEvaluator {
-  public static evaluateService(service: ServiceHealth): IncidentAlert | null {
-    if (service.errorRatePercent > 5.0) {
-      return {
-        alertId: `alert-err-${service.serviceId}-${Date.now()}`,
-        serviceId: service.serviceId,
-        severity: "CRITICAL",
-        title: "High Error Rate Detected",
-        message: `Service ${service.serviceName} exceeded error threshold (5%). Current: ${service.errorRatePercent}%`,
-        metricValue: service.errorRatePercent,
-        threshold: 5.0,
-        timestamp: Date.now(),
-      };
-    }
-
-    if (service.latencyP99Ms > 250) {
-      return {
-        alertId: `alert-lat-${service.serviceId}-${Date.now()}`,
-        serviceId: service.serviceId,
-        severity: "HIGH",
-        title: "P99 Latency SLA Breach",
-        message: `Service ${service.serviceName} p99 response time degraded to ${service.latencyP99Ms}ms`,
-        metricValue: service.latencyP99Ms,
-        threshold: 250.0,
-        timestamp: Date.now(),
-      };
-    }
-
-    return null;
-  }
-
-  public static evaluateNode(node: NodeMetrics): IncidentAlert | null {
-    if (node.cpuUsagePercent > 90.0) {
-      return {
-        alertId: `alert-cpu-${node.nodeId}-${Date.now()}`,
-        serviceId: node.nodeId,
-        severity: "CRITICAL",
-        title: "Node CPU Saturation",
-        message: `Node ${node.nodeId} in cluster ${node.cluster} reached ${node.cpuUsagePercent}% CPU`,
-        metricValue: node.cpuUsagePercent,
-        threshold: 90.0,
-        timestamp: Date.now(),
-      };
-    }
-    return null;
+  static evaluateService(service: ServiceHealth): IncidentAlert | null {
+    if (service.status === "HEALTHY") return null;
+    const severity = service.status === "CRITICAL" ? "critical" : "warning";
+    return { id: `${service.serviceId}:${service.status}:${service.timestamp}`, serviceId: service.serviceId, serviceName: service.serviceName, severity, message: `${service.serviceName} is ${service.status.toLowerCase()} (p99 ${service.latencyP99Ms} ms, errors ${service.errorRatePercent}%)`, timestamp: service.timestamp };
   }
 }
